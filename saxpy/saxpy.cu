@@ -75,13 +75,18 @@ void saxpyCuda(int N, float alpha, float* xarray, float* yarray, float* resultar
     //
     // https://devblogs.nvidia.com/easy-introduction-cuda-c-and-c/
     //
-        
+    device_x 	  = cudaMalloc(&device_x, N*sizeof(float));
+    device_y 	  = cudaMalloc(&device_y, N*sizeof(float));
+    device_result = cudaMalloc(&device_result, N*sizeof(float));
+
     // start timing after allocation of device memory
     double startTime = CycleTimer::currentSeconds();
 
     //
     // CS149 TODO: copy input arrays to the GPU using cudaMemcpy
     //
+    cudaMemcpy(device_x, xarray, N*sizeof(float), cudaMemcpyHostToDevice); 
+    cudaMemcpy(device_y, yarray, N*sizeof(float), cudaMemcpyHostToDevice); 
 
    
     // run CUDA kernel. (notice the <<< >>> brackets indicating a CUDA
@@ -91,16 +96,17 @@ void saxpyCuda(int N, float alpha, float* xarray, float* yarray, float* resultar
     //
     // CS149 TODO: copy result from GPU back to CPU using cudaMemcpy
     //
+    cudaMemcpy(resultarray, device_result, N*sizeof(float), cudaMemcpyDeviceToHost);
 
     
     // end timing after result has been copied back into host memory
-    //double endTime = CycleTimer::currentSeconds();
+    double endTime = CycleTimer::currentSeconds();
 
-    cudaError_t errCode = cudaPeekAtLastError();
-    if (errCode != cudaSuccess) {
-        fprintf(stderr, "WARNING: A CUDA error occured: code=%d, %s\n",
-		errCode, cudaGetErrorString(errCode));
-    }
+    // cudaError_t errCode = cudaPeekAtLastError();
+    // if (errCode != cudaSuccess) {
+    //     fprintf(stderr, "WARNING: A CUDA error occured: code=%d, %s\n",
+	// 	errCode, cudaGetErrorString(errCode));
+    // }
 
     double overallDuration = endTime - startTime;
     printf("Effective BW by CUDA saxpy: %.3f ms\t\t[%.3f GB/s]\n", 1000.f * overallDuration, GBPerSec(totalBytes, overallDuration));
