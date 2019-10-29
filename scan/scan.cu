@@ -127,8 +127,8 @@ void exclusive_scan_serial(int* input, int N, int* result)
 
     int* output = h_result;
 
-    // printf("Initial \n");
-    // print_out(output,N2);
+    printf("Initial \n");
+    print_out(output,N2);
 
     // upsweep phase
     for (int two_d = 1; two_d < N2/2; two_d*=2) {
@@ -136,7 +136,7 @@ void exclusive_scan_serial(int* input, int N, int* result)
         int numThreads = N2 / two_dplus1;
         for (int j = 0; j < numThreads; j += 1) {
             int i = j * two_dplus1;
-            // printf("write to %d, from %d \n", i + two_dplus1 - 1, i + two_d - 1);
+            // printf("write %d -> %d \n", i + two_d - 1, i + two_dplus1 - 1);
             output[i+two_dplus1-1] += output[i+two_d-1];
         }
         // printf("upsweep %d: ", two_d);
@@ -161,6 +161,8 @@ void exclusive_scan_serial(int* input, int N, int* result)
     cudaMemcpy(result, h_result, N2 * sizeof(int), cudaMemcpyHostToDevice);
     free(h_result);
 
+    printf("Final\n");
+    print_out(output,N2);
         
 
 }
@@ -179,8 +181,8 @@ void exclusive_scan(int* input, int N, int* result)
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
     
-    // exclusive_scan_serial(input, N, result);
-    exclusive_scan_parallel(input, N, result);
+    exclusive_scan_serial(input, N, result);
+    // exclusive_scan_parallel(input, N, result);
 
 }
 
@@ -305,8 +307,17 @@ int find_repeats(int* device_input, int length, int* device_output) {
     // Use scan to count the total
     exclusive_scan(device_input, length, device_output);
 
-    
-    return 0; 
+    int* output; 
+    int off = length-1;
+    output = (int*)malloc(sizeof(int));
+    cudaMemcpy(output, device_output + length-1, sizeof(int), cudaMemcpyDeviceToHost); 
+
+    printf("total %d\n", output[0]);
+
+    int repeats = output[0];
+    free(output);
+
+    return repeats; 
 }
 
 
