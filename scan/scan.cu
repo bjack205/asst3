@@ -78,23 +78,26 @@ void exclusive_scan_parallel(int* input, int N, int* result)
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
     
+    int N2 = nextPow2(N);
     const int threadsPerBlock = 512;
 
     // upsweep phase
-    for (int two_d = 1; two_d < N/2; two_d*=2) {
+    for (int two_d = 1; two_d < N2/2; two_d*=2) {
         int two_dplus1 = 2*two_d;
-        int numThreads = N / two_dplus1;
+        int numThreads = N2 / two_dplus1;
         int blocks = (numThreads + threadsPerBlock - 1) / threadsPerBlock;
-        upsweep<<<blocks,threadsPerBlock>>>(N, two_d, result);
+        upsweep<<<blocks,threadsPerBlock>>>(N2, two_d, result);
     }
 
     // downsweep phase
-    for (int two_d = N/2; two_d >= 1; two_d /= 2) {
+    for (int two_d = N2/2; two_d >= 1; two_d /= 2) {
         int two_dplus1 = 2*two_d;
-        int numThreads = N / two_dplus1;
+        int numThreads = N2 / two_dplus1;
         int blocks = (numThreads + threadsPerBlock - 1) / threadsPerBlock;
-        downsweep<<<blocks,threadsPerBlock>>>(N, two_d, result);
+        downsweep<<<blocks,threadsPerBlock>>>(N2, two_d, result);
     }
+    
+
 
 }
 
@@ -171,8 +174,8 @@ void exclusive_scan(int* input, int N, int* result)
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
     
-    exclusive_scan_serial(input, N, result);
-    // exclusive_scan_parallel(input, N, result);
+    // exclusive_scan_serial(input, N, result);
+    exclusive_scan_parallel(input, N, result);
 
 }
 
