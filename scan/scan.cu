@@ -79,7 +79,7 @@ void exclusive_scan_parallel(int* input, int N, int* result)
     // scan.
     
     int N2 = nextPow2(N);
-    const int threadsPerBlock = 512;
+    const int threadsPerBlock = 1000;
 
     // upsweep phase
     for (int two_d = 1; two_d < N2/2; two_d*=2) {
@@ -87,6 +87,7 @@ void exclusive_scan_parallel(int* input, int N, int* result)
         int numThreads = N2 / two_dplus1;
         int blocks = (numThreads + threadsPerBlock - 1) / threadsPerBlock;
         upsweep<<<blocks,threadsPerBlock>>>(N2, two_d, result);
+        cudaDeviceSynchronize(); 
     }
 
     // downsweep phase
@@ -95,8 +96,8 @@ void exclusive_scan_parallel(int* input, int N, int* result)
         int numThreads = N2 / two_dplus1;
         int blocks = (numThreads + threadsPerBlock - 1) / threadsPerBlock;
         downsweep<<<blocks,threadsPerBlock>>>(N2, two_d, result);
+        cudaDeviceSynchronize(); 
     }
-    
 
 
 }
@@ -132,7 +133,9 @@ void exclusive_scan_serial(int* input, int N, int* result)
     // upsweep phase
     for (int two_d = 1; two_d < N2/2; two_d*=2) {
         int two_dplus1 = 2*two_d;
-        for (int i = 0; i < N2; i += two_dplus1) {
+        int numThreads = N2 / two_dplus1;
+        for (int j = 0; j < numThreads; j += 1) {
+            int i = j * two_dplus1;
             // printf("write to %d, from %d \n", i + two_dplus1 - 1, i + two_d - 1);
             output[i+two_dplus1-1] += output[i+two_d-1];
         }
@@ -145,7 +148,9 @@ void exclusive_scan_serial(int* input, int N, int* result)
     // downsweep phase 
     for (int two_d = N2/2; two_d >= 1; two_d /= 2) {
         int two_dplus1 = 2*two_d;
-        for (int i = 0; i < N2; i += two_dplus1) {
+        int numThreads = N2 / two_dplus1;
+        for (int j = 0; j < numThreads; j += 1) {
+            int i = j * two_dplus1;
             int t = output[i+two_d-1];
             output[i+two_d-1] = output[i+two_dplus1-1];
             output[i+two_dplus1-1] += t;
