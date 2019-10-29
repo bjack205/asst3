@@ -98,6 +98,11 @@ void exclusive_scan_parallel(int* input, int N, int* result)
 
 }
 
+void print_out(int* result, int N) {
+    for (int i = 0; i < N; i++)
+        printf("%d ", result[i]);
+    printf("\n");
+}
 
 void exclusive_scan_serial(int* input, int N, int* result)
 {
@@ -111,36 +116,47 @@ void exclusive_scan_serial(int* input, int N, int* result)
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
     
-    int* h_result; 
-    h_result = (int*)malloc(N*sizeof(int));
-    cudaMemcpy(h_result, result, N * sizeof(int), cudaMemcpyDeviceToHost);
     
-    int* output = h_result;
+    int* output = result;
+    for (int i = 0; i < N; i++)
+        output[i] = input[i];
+
+    printf("Initial\n");
+    print_out(output,N);
 
     // upsweep phase
     for (int two_d = 1; two_d < N/2; two_d*=2) {
         int two_dplus1 = 2*two_d;
-        int numThreads = N / two_dplus1;
-        for (int j = 0; j < numThreads; j++) {
-            int i = j * two_dplus1;
+        for (int i = 0; i < N; i += two_dplus1) {
+            printf("write to %d, from %d \n", i + two_dplus1 - 1, i + two_d - 1);
             output[i+two_dplus1-1] += output[i+two_d-1];
+            print_out(output,N);
         }
     }
+
+    for (int i = 1; i < N; i++)
+        printf("%d ", result[i]);
+    printf("\n");
 
     output[N-1] = 0;
 
     // downsweep phase
     for (int two_d = N/2; two_d >= 1; two_d /= 2) {
         int two_dplus1 = 2*two_d;
-        int numThreads = N / two_dplus1;
-        for (int j = 0; j < numThreads; j++) {
-            int i = j * two_dplus1;
+        for (int i = 0; i < N; i += two_dplus1) {
+            printf("write to (%d,%d), from (%d,%d) \n", 
+                    i + two_d - 1, i + two_dplus1-1,
+                    i + two_dplus1 - 1, i + two_d - 1);
             int t = output[i+two_d-1];
             output[i+two_d-1] = output[i+two_dplus1-1];
             output[i+two_dplus1-1] += t;
         }
     }
-    cudaMemcpy(result, h_result, N * sizeof(int), cudaMemcpyHostToDevice);
+
+    for (int i = 1; i < N; i++)
+        printf("%d ", result[i]);
+    printf("\n");
+        
 
 }
 
@@ -158,8 +174,8 @@ void exclusive_scan(int* input, int N, int* result)
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
     
-    // exclusive_scan_serial(input, N, result);
-    exclusive_scan_parallel(input, N, result);
+    exclusive_scan_serial(input, N, result);
+    // exclusive_scan_parallel(input, N, result);
 
 }
 
@@ -191,7 +207,7 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     cudaMalloc((void **)&device_result, sizeof(int) * rounded_length);
     cudaMalloc((void **)&device_input, sizeof(int) * rounded_length);
 
-    // For convenience, both the input and output vectors on the
+    // For convenience, both the input and output vect rs on the
     // device are initialized to the input values. This means that
     // students are free to implement an in-place scan on the result
     // vector if desired.  If you do this, you will need to keep this
@@ -201,13 +217,14 @@ double cudaScan(int* inarray, int* end, int* resultarray)
 
     double startTime = CycleTimer::currentSeconds();
 
-    exclusive_scan(device_input, N, device_result);
+    // exclusive_scan(device_input, N, device_result);
+    exclusive_scan_serial(inarray, N, resultarray);
 
     // Wait for completion
     cudaDeviceSynchronize();
     double endTime = CycleTimer::currentSeconds();
        
-    cudaMemcpy(resultarray, device_result, (end - inarray) * sizeof(int), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(resultarray, device_result, (end - inarray) * sizeof(int), cudaMemcpyDeviceToHost);
 
     double overallDuration = endTime - startTime;
     return overallDuration; 
