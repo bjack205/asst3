@@ -42,6 +42,110 @@ static inline int nextPow2(int n) {
 // Also, as per the comments in cudaScan(), you can implement an
 // "in-place" scan, since the timing harness makes a copy of input and
 // places it in result
+
+__global__ void upsweep(int N, int two_d, int* output) {
+    int two_dplus1 = 2*two_d;
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = j * two_dplus1;
+
+    output[i+two_dplus1-1] += output[i+two_d-1];
+}
+
+__global__ void downsweep(int N, int two_d, int* output) {
+    // Handle first iteration
+    if (two_d == N/2)
+        output[N-1] = 0;
+
+    int two_dplus1 = 2*two_d;
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = j * two_dplus1;
+    int t = output[i+two_d-1];
+
+    
+    output[i+two_d-1] = output[i+two_dplus1-1];
+    output[i+two_dplus1-1] += t;
+}
+    
+void exclusive_scan_parallel(int* input, int N, int* result)
+{
+
+    // CS149 TODO:
+    //
+    // Implement your exclusive scan implementation here.  Keep input
+    // mind that although the arguments to this function are device
+    // allocated arrays, this is a function that is running in a thread
+    // on the CPU.  Your implementation will need to make multiple calls
+    // to CUDA kernel functions (that you must write) to implement the
+    // scan.
+    
+    const int threadsPerBlock = 512;
+
+    // upsweep phase
+    for (int two_d = 1; two_d < N/2; two_d*=2) {
+        int two_dplus1 = 2*two_d;
+        int numThreads = N / two_dplus1;
+        int blocks = (numThreads + threadsPerBlock - 1) / threadsPerBlock;
+        upsweep<<<blocks,threadsPerBlock>>>(N, two_d, result);
+    }
+
+    // downsweep phase
+    for (int two_d = N/2; two_d >= 1; two_d /= 2) {
+        int two_dplus1 = 2*two_d;
+        int numThreads = N / two_dplus1;
+        int blocks = (numThreads + threadsPerBlock - 1) / threadsPerBlock;
+        downsweep<<<blocks,threadsPerBlock>>>(N, two_d, result);
+    }
+
+}
+
+
+void exclusive_scan_serial(int* input, int N, int* result)
+{
+
+    // CS149 TODO:
+    //
+    // Implement your exclusive scan implementation here.  Keep input
+    // mind that although the arguments to this function are device
+    // allocated arrays, this is a function that is running in a thread
+    // on the CPU.  Your implementation will need to make multiple calls
+    // to CUDA kernel functions (that you must write) to implement the
+    // scan.
+    
+    int* h_result; 
+    h_result = (int*)malloc(N*sizeof(int));
+    cudaMemcpy(h_result, result, N * sizeof(int), cudaMemcpyDeviceToHost);
+    
+    int* output = h_result;
+
+    // upsweep phase
+    for (int two_d = 1; two_d < N/2; two_d*=2) {
+        int two_dplus1 = 2*two_d;
+        int numThreads = N / two_dplus1;
+        for (int j = 0; j < numThreads; j++) {
+            int i = j * two_dplus1;
+            output[i+two_dplus1-1] += output[i+two_d-1];
+        }
+    }
+
+    output[N-1] = 0;
+
+    // downsweep phase
+    for (int two_d = N/2; two_d >= 1; two_d /= 2) {
+        int two_dplus1 = 2*two_d;
+        int numThreads = N / two_dplus1;
+        for (int j = 0; j < numThreads; j++) {
+            int i = j * two_dplus1;
+            int t = output[i+two_d-1];
+            output[i+two_d-1] = output[i+two_dplus1-1];
+            output[i+two_dplus1-1] += t;
+        }
+    }
+    cudaMemcpy(result, h_result, N * sizeof(int), cudaMemcpyHostToDevice);
+
+}
+
+
+
 void exclusive_scan(int* input, int N, int* result)
 {
 
@@ -53,7 +157,9 @@ void exclusive_scan(int* input, int N, int* result)
     // on the CPU.  Your implementation will need to make multiple calls
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
-
+    
+    // exclusive_scan_serial(input, N, result);
+    exclusive_scan_parallel(input, N, result);
 
 }
 
@@ -147,6 +253,14 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
 // indices `i` for which `device_input[i] == device_input[i+1]`.
 //
 // Returns the total number of pairs found
+__global__ void isrepeat(int* input, int length, int* output) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if ( (index < length - 1) && (input[index] == input[index+1]) )
+        output[index] = 1;
+    else
+        output[index] = 0;
+}
+
 int find_repeats(int* device_input, int length, int* device_output) {
 
     // CS149 TODO:
@@ -161,6 +275,16 @@ int find_repeats(int* device_input, int length, int* device_output) {
     // must ensure that the results of find_repeats are correct given
     // the actual array length.
 
+    const int threadsPerBlock = 512;
+    const int blocks = (length + threadsPerBlock - 1) / threadsPerBlock;
+
+    // Place 1s wherever there is a repeat
+    isrepeat<<<blocks,threadsPerBlock>>>(device_input, length, device_output);
+
+    // Use scan to count the total
+    exclusive_scan(device_input, length, device_output);
+
+    
     return 0; 
 }
 
