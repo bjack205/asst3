@@ -27,6 +27,14 @@ private:
     float* cudaDeviceRadius;
     float* cudaDeviceImageData;
 
+    int* screenX;
+    int* screenY;
+    int* cudaDeviceScreenX;
+    // int* cudaDeviceScreenY;
+
+    // New Methods
+    void calcBoundingBox();
+
 public:
 
     CudaRenderer();
@@ -51,6 +59,7 @@ public:
         float pixelCenterX, float pixelCenterY,
         float px, float py, float pz,
         float* pixelData);
+
 };
 
 

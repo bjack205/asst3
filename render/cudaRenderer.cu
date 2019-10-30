@@ -31,6 +31,10 @@ struct GlobalConstants {
     int imageWidth;
     int imageHeight;
     float* imageData;
+
+    // Added variables
+    int* screenX;
+    int* screenY;
 };
 
 // Global variable that is in scope, but read-only, for all cuda
@@ -444,6 +448,8 @@ CudaRenderer::CudaRenderer() {
     cudaDeviceColor = NULL;
     cudaDeviceRadius = NULL;
     cudaDeviceImageData = NULL;
+
+    cudaDeviceScreenX = NULL;
 }
 
 CudaRenderer::~CudaRenderer() {
@@ -465,6 +471,8 @@ CudaRenderer::~CudaRenderer() {
         cudaFree(cudaDeviceColor);
         cudaFree(cudaDeviceRadius);
         cudaFree(cudaDeviceImageData);
+        cudaFree(cudaDeviceScreenX);
+        // cudaFree(cudaDeviceScreenY);
     }
 }
 
@@ -531,6 +539,29 @@ CudaRenderer::setup() {
     cudaMemcpy(cudaDeviceColor, color, sizeof(float) * 3 * numCircles, cudaMemcpyHostToDevice);
     cudaMemcpy(cudaDeviceRadius, radius, sizeof(float) * numCircles, cudaMemcpyHostToDevice);
 
+    // New variables
+    screenX = new int[2 * numCircles]; 
+    screenY = new int[2 * numCircles]; 
+    for (int i = 0; i < 2 * numCircles; i++) {
+        screenX[i] = 0;
+        screenY[i] = 0;
+    }
+
+    // int* device_screenX;
+    // cudaMalloc(&cudaDeviceScreenX, sizeof(int) * 2 * numCircles);
+    // cudaMalloc(&cudaDeviceScreenY, sizeof(int) * 2 * numCircles);
+    // cudaMemcpy(cudaDeviceScreenX, screenX, sizeof(int) * 2 * numCircles, cudaMemcpyHostToDevice);
+    // cudaMemcpy(cudaDeviceScreenY, screenY, sizeof(int) * 2 * numCircles, cudaMemcpyHostToDevice);
+
+    int* d_screenX;
+    int* d_screenY;
+    cudaMalloc(&d_screenX, sizeof(int) * 2 * numCircles);
+    cudaMalloc(&d_screenY, sizeof(int) * 2 * numCircles);
+    cudaMemcpy(d_screenX, screenX, sizeof(int) * 2 * numCircles, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_screenX, screenY, sizeof(int) * 2 * numCircles, cudaMemcpyHostToDevice);
+
+
+
     // Initialize parameters in constant memory.  We didn't talk about
     // constant memory in class, but the use of read-only constant
     // memory here is an optimization over just sticking these values
@@ -549,6 +580,8 @@ CudaRenderer::setup() {
     params.color = cudaDeviceColor;
     params.radius = cudaDeviceRadius;
     params.imageData = cudaDeviceImageData;
+    params.screenX = d_screenX;
+    params.screenY = d_screenY;
 
     cudaMemcpyToSymbol(cuConstRendererParams, &params, sizeof(GlobalConstants));
 
@@ -631,11 +664,25 @@ CudaRenderer::advanceAnimation() {
         kernelAdvanceFireWorks<<<gridDim, blockDim>>>(); 
     }
     cudaDeviceSynchronize();
+
+    cudaMemcpy(position, cudaDevicePosition, sizeof(float) * 3 * numCircles, cudaMemcpyDeviceToHost);
+    cudaMemcpy(velocity, cudaDeviceVelocity, sizeof(float) * 3 * numCircles, cudaMemcpyDeviceToHost);
+    cudaMemcpy(color,    cudaDeviceColor,    sizeof(float) * 3 * numCircles, cudaMemcpyDeviceToHost);
+    cudaMemcpy(radius,   cudaDeviceRadius,   sizeof(float)     * numCircles, cudaMemcpyDeviceToHost);
 }
 
-__global__ void pixelKernel(int circleIndex, float3 p,
+__global__ void pixelKernel(int circleIndex, 
         int screenMinX, int screenMaxX,
         int screenMinY, int screenMaxY ) {
+
+    int* screenX = cuConstRendererParams.screenX;
+    int* screenY = cuConstRendererParams.screenY;
+    
+    int index2 = circleIndex * 2;
+    int index3 = circleIndex * 3;
+    int index4 = circleIndex * 4;
+
+    float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
 
     short imageWidth = cuConstRendererParams.imageWidth;
     short imageHeight = cuConstRendererParams.imageHeight;
@@ -643,8 +690,15 @@ __global__ void pixelKernel(int circleIndex, float3 p,
     float invWidth = 1.f / imageWidth;
     float invHeight = 1.f / imageHeight;
 
-    float screenWidth = screenMaxX - screenMinX;
-    float screenHeight = screenMaxY - screenMinY;
+    // int screenWidth = screenMaxX - screenMinX;
+    // int screenHeight = screenMaxY - screenMinY;
+
+    int screenWidth  = screenX[index2+1] - screenX[index2];
+    int screenHeight = screenY[index2+1] - screenY[index2];
+    
+    // int screenWidth  = screenX[index4+1] - screenX[index2+0];
+    // int screenHeight = screenY[index4+3] - screenY[index2+2];
+
 
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -664,28 +718,49 @@ __global__ void pixelKernel(int circleIndex, float3 p,
     shadePixel(circleIndex, pixelCenterNorm, p, imgPtr);
 }
 
-__global__ void singlePixelKernel(int circleIndex, int pixelIndex, float3 p, float2 pixelCenterNorm) {
-    float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[pixelIndex]);
-    shadePixel(circleIndex, pixelCenterNorm, p, imgPtr);
+__global__ void kernelBoundingBox() {
+
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (index >= cuConstRendererParams.numCircles)
+        return;
+
+    int index3 = 3 * index;
+
+    // read position and radius
+    float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
+    float  rad = cuConstRendererParams.radius[index];
+
+    // compute the bounding box of the circle. The bound is in integer
+    // screen coordinates, so it's clamped to the edges of the screen.
+    short imageWidth = cuConstRendererParams.imageWidth;
+    short imageHeight = cuConstRendererParams.imageHeight;
+    short minX = static_cast<short>(imageWidth * (p.x - rad));
+    short maxX = static_cast<short>(imageWidth * (p.x + rad)) + 1;
+    short minY = static_cast<short>(imageHeight * (p.y - rad));
+    short maxY = static_cast<short>(imageHeight * (p.y + rad)) + 1;
+
+    // a bunch of clamps.  Is there a CUDA built-in for this?
+    short screenMinX = (minX > 0) ? ((minX < imageWidth) ? minX : imageWidth) : 0;
+    short screenMaxX = (maxX > 0) ? ((maxX < imageWidth) ? maxX : imageWidth) : 0;
+    short screenMinY = (minY > 0) ? ((minY < imageHeight) ? minY : imageHeight) : 0;
+    short screenMaxY = (maxY > 0) ? ((maxY < imageHeight) ? maxY : imageHeight) : 0;
+
+    int index2 = 2 * index;
+    int* screenX = cuConstRendererParams.screenX;
+    int* screenY = cuConstRendererParams.screenY;
+    screenX[index2]   = screenMinX;
+    screenX[index2+1] = screenMaxX;
+    screenY[index2]   = screenMinY;
+    screenY[index2+1] = screenMaxY;
 }
 
-void
-CudaRenderer::render() {
+void CudaRenderer::calcBoundingBox() {
 
-    // 256 threads per block is a healthy number
-    dim3 blockDim0(256, 1);
-    // dim3 gridDim( (numCircles + blockDim0.x - 1) / blockDim0.x );
-
-    // kernelRenderCircles<<<gridDim, blockDim0>>>();
-    // cudaDeviceSynchronize();
-    // return;
-
-    dim3 blockDim(16, 16);
-
-    // render all circles
-    for (int circleIndex=0; circleIndex<numCircles; circleIndex++) {
+    for (int circleIndex = 0; circleIndex<numCircles; circleIndex++) {
 
         int index3 = 3 * circleIndex;
+        int index2 = 2 * circleIndex;
 
         float px = position[index3];
         float py = position[index3+1];
@@ -707,14 +782,49 @@ CudaRenderer::render() {
         int screenMinY = CLAMP(static_cast<int>(minY * image->height), 0, image->height);
         int screenMaxY = CLAMP(static_cast<int>(maxY * image->height)+1, 0, image->height);
 
+        screenX[index2]   = screenMinX;
+        screenX[index2+1] = screenMaxX;
+        screenY[index2]   = screenMinY;
+        screenY[index2+1] = screenMaxY;
+    }
+
+}
+
+void
+CudaRenderer::render() {
+
+    // 256 threads per block is a healthy number
+    dim3 blockDim0(256, 1);
+    dim3 gridDim0( (numCircles + blockDim0.x - 1) / blockDim0.x );
+
+    kernelBoundingBox<<<gridDim0, blockDim0>>>();
+    cudaDeviceSynchronize();
+
+    // kernelRenderCircles<<<gridDim, blockDim0>>>();
+    // cudaDeviceSynchronize();
+    // return;
+
+
+    dim3 blockDim(16, 16);
+
+    calcBoundingBox();
+
+    // render all circles
+    for (int circleIndex=0; circleIndex<numCircles; circleIndex++) {
+
+        int index2 = 2 * circleIndex;
+
         // Compute grid size
-        float screenWidth = screenMaxX - screenMinX;
-        float screenHeight = screenMaxY - screenMinY;
+        int screenMinX = screenX[index2];
+        int screenMaxX = screenX[index2+1];
+        int screenMinY = screenY[index2];
+        int screenMaxY = screenY[index2+1];
+        int screenWidth = screenMaxX - screenMinX;
+        int screenHeight = screenMaxY - screenMinY;
         dim3 gridDim( (screenWidth + blockDim.x - 1) / blockDim.x,
                       (screenHeight + blockDim.y - 1) / blockDim.y);
 
-
-        pixelKernel<<<gridDim,blockDim>>>(circleIndex, p,
+        pixelKernel<<<gridDim,blockDim>>>(circleIndex, 
                 screenMinX, screenMaxX, screenMinY, screenMaxY);
 
         cudaDeviceSynchronize();
