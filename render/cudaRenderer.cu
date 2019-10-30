@@ -637,39 +637,31 @@ __global__ void pixelKernel(int circleIndex, float3 p,
         int screenMinX, int screenMaxX,
         int screenMinY, int screenMaxY ) {
 
-
     short imageWidth = cuConstRendererParams.imageWidth;
     short imageHeight = cuConstRendererParams.imageHeight;
 
     float invWidth = 1.f / imageWidth;
     float invHeight = 1.f / imageHeight;
 
-    int pixelX = blockIdx.x * blockDim.x + threadIdx.x + screenMinX;
-    int pixelY = blockIdx.y * blockDim.y + threadIdx.y + screenMinY;
+    float screenWidth = screenMaxX - screenMinX;
+    float screenHeight = screenMaxY - screenMinY;
 
-    // Only compute pixels inside bounding box
-    if ( (pixelX >= screenMaxX) || (pixelY >= screenMaxY) )
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if ( (i >= screenWidth) || (j >= screenHeight) )
         return;
 
-    printf("   pixel (%d, %d)\n", pixelX, pixelY);
+    int pixelX = i + screenMinX;
+    int pixelY = j + screenMinY;
 
-    int idx = 4 * (pixelY * imageWidth + pixelX);
-    float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[idx]);
 
-    // When "shading" the pixel ("shading" = computing the
-    // circle's color and opacity at the pixel), we treat
-    // the pixel as a point at the center of the pixel.
-    // We'll compute the color of the circle at this
-    // point.  Note that shading math will occur in the
-    // normalized [0,1]^2 coordinate space, so we convert
-    // the pixel center into this coordinate space prior
-    // to calling shadePixel.
     float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
             invHeight * (static_cast<float>(pixelY) + 0.5f));
 
-    // shadePixel(circleIndex, pixelCenterNormX, pixelCenterNormY, px, py, pz, imgPtr);
-    shadePixel(idx, pixelCenterNorm, p, imgPtr);
-
+    int pixelIndex = 4 * (pixelY * imageWidth + pixelX);
+    float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[pixelIndex]);
+    shadePixel(circleIndex, pixelCenterNorm, p, imgPtr);
 }
 
 __global__ void singlePixelKernel(int circleIndex, int pixelIndex, float3 p, float2 pixelCenterNorm) {
@@ -682,7 +674,7 @@ CudaRenderer::render() {
 
     // 256 threads per block is a healthy number
     dim3 blockDim0(256, 1);
-    dim3 gridDim( (numCircles + blockDim0.x - 1) / blockDim0.x );
+    // dim3 gridDim( (numCircles + blockDim0.x - 1) / blockDim0.x );
 
     // kernelRenderCircles<<<gridDim, blockDim0>>>();
     // cudaDeviceSynchronize();
@@ -692,9 +684,6 @@ CudaRenderer::render() {
 
     // render all circles
     for (int circleIndex=0; circleIndex<numCircles; circleIndex++) {
-
-        int imageWidth  = image->width;
-        int imageHeight = image->height;
 
         int index3 = 3 * circleIndex;
 
@@ -718,19 +707,18 @@ CudaRenderer::render() {
         int screenMinY = CLAMP(static_cast<int>(minY * image->height), 0, image->height);
         int screenMaxY = CLAMP(static_cast<int>(maxY * image->height)+1, 0, image->height);
 
-        float invWidth = 1.f / image->width;
-        float invHeight = 1.f / image->height;
+        // Compute grid size
+        float screenWidth = screenMaxX - screenMinX;
+        float screenHeight = screenMaxY - screenMinY;
+        dim3 gridDim( (screenWidth + blockDim.x - 1) / blockDim.x,
+                      (screenHeight + blockDim.y - 1) / blockDim.y);
 
-        // for all pixels in the bounding box
-        for (int pixelY=screenMinY; pixelY<screenMaxY; pixelY++) {
-            // float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[pixelIndex]);
-            for (int pixelX=screenMinX; pixelX<screenMaxX; pixelX++) {
-                int pixelIndex = 4 * (pixelY * imageWidth + pixelX);
-                float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
-                        invHeight * (static_cast<float>(pixelY) + 0.5f));
-                singlePixelKernel<<<1,1>>>(circleIndex, pixelIndex, p, pixelCenterNorm);
-            }
-        }
+
+        pixelKernel<<<gridDim,blockDim>>>(circleIndex, p,
+                screenMinX, screenMaxX, screenMinY, screenMaxY);
+
+        cudaDeviceSynchronize();
+
     }
 }
 
