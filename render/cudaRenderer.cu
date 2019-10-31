@@ -682,6 +682,34 @@ CudaRenderer::advanceAnimation() {
     // cudaMemcpy(radius,   cudaDeviceRadius,   sizeof(float)     * numCircles, cudaMemcpyDeviceToHost);
 }
 
+__device__ bool pixelInCircle(int circleIndex, int pixelX, int pixelY) {
+
+    int index3 = circleIndex * 3;
+
+    float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
+
+    short imageWidth = cuConstRendererParams.imageWidth;
+    short imageHeight = cuConstRendererParams.imageHeight;
+    float invWidth = 1.f / imageWidth;
+    float invHeight = 1.f / imageHeight;
+
+    float2 pixelCenter = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
+            invHeight * (static_cast<float>(pixelY) + 0.5f));
+
+    float diffX = p.x - pixelCenter.x;
+    float diffY = p.y - pixelCenter.y;
+    float pixelDist = diffX * diffX + diffY * diffY;
+
+    float rad = cuConstRendererParams.radius[circleIndex];;
+    float maxDist = rad * rad;
+
+    // circle does not contribute to the image
+    if (pixelDist > maxDist)
+        return false;
+    else
+        return true;
+}
+
 __global__ void multiCirclePixelKernel(int start) {
 
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -803,45 +831,6 @@ __global__ void kernelBoundingBox() {
     screenY[index2+1] = screenMaxY;
 }
 
-void CudaRenderer::calcBoundingBox() {
-
-    for (int circleIndex = 0; circleIndex<numCircles; circleIndex++) {
-
-        int index3 = 3 * circleIndex;
-        int index2 = 2 * circleIndex;
-
-        float px = position[index3];
-        float py = position[index3+1];
-        float pz = position[index3+2];
-        float3 p = make_float3(px,py,pz);
-        float rad = radius[circleIndex];
-
-        // compute the bounding box of the circle.  This bounding box
-        // is in normalized coordinates
-        float minX = px - rad;
-        float maxX = px + rad;
-        float minY = py - rad;
-        float maxY = py + rad;
-
-        // bboxX[index2]   = minX;
-        // bboxX[index2+1] = maxX;
-        // bboxY[index2]   = minY;
-        // bboxY[index2+1] = maxY;
-
-        // convert normalized coordinate bounds to integer screen
-        // pixel bounds.  Clamp to the edges of the screen.
-        int screenMinX = CLAMP(static_cast<int>(minX * image->width), 0, image->width);
-        int screenMaxX = CLAMP(static_cast<int>(maxX * image->width)+1, 0, image->width);
-        int screenMinY = CLAMP(static_cast<int>(minY * image->height), 0, image->height);
-        int screenMaxY = CLAMP(static_cast<int>(maxY * image->height)+1, 0, image->height);
-
-        screenX[index2]   = screenMinX;
-        screenX[index2+1] = screenMaxX;
-        screenY[index2]   = screenMinY;
-        screenY[index2+1] = screenMaxY;
-    }
-
-}
 
 void
 CudaRenderer::render() {
@@ -862,8 +851,6 @@ CudaRenderer::render() {
 
 
     dim3 blockDim(16, 16);
-
-    // calcBoundingBox();
 
     // render all circles
     for (int circleIndex=0; circleIndex<numCircles; circleIndex++) {
