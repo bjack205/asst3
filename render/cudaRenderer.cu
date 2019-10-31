@@ -449,9 +449,12 @@ CudaRenderer::CudaRenderer() {
     cudaDeviceRadius = NULL;
     cudaDeviceImageData = NULL;
 
-    // cudaDeviceScreenX = NULL;
-    bX = NULL;
+    cudaDeviceScreenX = NULL;
+    cudaDeviceScreenY = NULL;
+    bX = 0;
     bY = NULL;
+    d_bX = NULL;
+    d_bY = NULL;
 }
 
 CudaRenderer::~CudaRenderer() {
@@ -477,8 +480,10 @@ CudaRenderer::~CudaRenderer() {
         cudaFree(cudaDeviceColor);
         cudaFree(cudaDeviceRadius);
         cudaFree(cudaDeviceImageData);
-        // cudaFree(cudaDeviceScreenX);
-        // cudaFree(cudaDeviceScreenY);
+        cudaFree(cudaDeviceScreenX);
+        cudaFree(cudaDeviceScreenY);
+        cudaFree(d_bX);
+        cudaFree(d_bY);
     }
 }
 
@@ -548,22 +553,25 @@ CudaRenderer::setup() {
     // New variables
     screenX = new int[2 * numCircles]; 
     screenY = new int[2 * numCircles]; 
+    bX = new int[2 * numCircles]; 
+    bY = new int[2 * numCircles]; 
     for (int i = 0; i < 2 * numCircles; i++) {
         screenX[i] = 0;
         screenY[i] = 0;
+        bX[i] = 0;
+        bY[i] = 0;
     }
 
-    // bX = new int[2 * numCircles]; 
-    // bY = new int[2 * numCircles]; 
 
-    int* d_screenX;
-    int* d_screenY;
-    cudaMalloc(&d_screenX, sizeof(int) * 2 * numCircles);
-    cudaMalloc(&d_screenY, sizeof(int) * 2 * numCircles);
-    cudaMemcpy(d_screenX, screenX, sizeof(int) * 2 * numCircles, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_screenX, screenY, sizeof(int) * 2 * numCircles, cudaMemcpyHostToDevice);
+    cudaMalloc(&cudaDeviceScreenX, sizeof(int) * 2 * numCircles);
+    cudaMalloc(&cudaDeviceScreenY, sizeof(int) * 2 * numCircles);
+    cudaMemcpy(cudaDeviceScreenX, screenX, sizeof(int) * numCircles, cudaMemcpyHostToDevice);
+    cudaMemcpy(cudaDeviceScreenY, screenY, sizeof(int) * numCircles, cudaMemcpyHostToDevice);
 
-
+    cudaMalloc(&d_bX, sizeof(int) * 2 * numCircles);
+    cudaMalloc(&d_bY, sizeof(int) * 2 * numCircles);
+    cudaMemcpy(d_bX, bX, sizeof(int) * numCircles, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_bY, bY, sizeof(int) * numCircles, cudaMemcpyHostToDevice);
 
     // Initialize parameters in constant memory.  We didn't talk about
     // constant memory in class, but the use of read-only constant
@@ -583,8 +591,8 @@ CudaRenderer::setup() {
     params.color = cudaDeviceColor;
     params.radius = cudaDeviceRadius;
     params.imageData = cudaDeviceImageData;
-    params.screenX = d_screenX;
-    params.screenY = d_screenY;
+    params.screenX = cudaDeviceScreenX;
+    params.screenY = cudaDeviceScreenY;
 
     cudaMemcpyToSymbol(cuConstRendererParams, &params, sizeof(GlobalConstants));
 
@@ -668,10 +676,10 @@ CudaRenderer::advanceAnimation() {
     }
     cudaDeviceSynchronize();
 
-    cudaMemcpy(position, cudaDevicePosition, sizeof(float) * 3 * numCircles, cudaMemcpyDeviceToHost);
-    cudaMemcpy(velocity, cudaDeviceVelocity, sizeof(float) * 3 * numCircles, cudaMemcpyDeviceToHost);
-    cudaMemcpy(color,    cudaDeviceColor,    sizeof(float) * 3 * numCircles, cudaMemcpyDeviceToHost);
-    cudaMemcpy(radius,   cudaDeviceRadius,   sizeof(float)     * numCircles, cudaMemcpyDeviceToHost);
+    // cudaMemcpy(position, cudaDevicePosition, sizeof(float) * 3 * numCircles, cudaMemcpyDeviceToHost);
+    // cudaMemcpy(velocity, cudaDeviceVelocity, sizeof(float) * 3 * numCircles, cudaMemcpyDeviceToHost);
+    // cudaMemcpy(color,    cudaDeviceColor,    sizeof(float) * 3 * numCircles, cudaMemcpyDeviceToHost);
+    // cudaMemcpy(radius,   cudaDeviceRadius,   sizeof(float)     * numCircles, cudaMemcpyDeviceToHost);
 }
 
 __global__ void multiCirclePixelKernel(int start) {
@@ -845,6 +853,9 @@ CudaRenderer::render() {
     kernelBoundingBox<<<gridDim0, blockDim0>>>();
     cudaDeviceSynchronize();
 
+    cudaMemcpy(screenX, cudaDeviceScreenX, sizeof(int) * 2 * numCircles, cudaMemcpyDeviceToHost);
+    cudaMemcpy(screenY, cudaDeviceScreenY, sizeof(int) * 2 * numCircles, cudaMemcpyDeviceToHost);
+
     // kernelRenderCircles<<<gridDim, blockDim0>>>();
     // cudaDeviceSynchronize();
     // return;
@@ -857,31 +868,10 @@ CudaRenderer::render() {
     // render all circles
     for (int circleIndex=0; circleIndex<numCircles; circleIndex++) {
 
-        int index3 = 3 * circleIndex;
         int index2 = 2 * circleIndex;
 
-        float px = position[index3];
-        float py = position[index3+1];
-        float pz = position[index3+2];
-        float3 p = make_float3(px,py,pz);
-        float rad = radius[circleIndex];
-
-        // compute the bounding box of the circle.  This bounding box
-        // is in normalized coordinates
-        float minX = px - rad;
-        float maxX = px + rad;
-        float minY = py - rad;
-        float maxY = py + rad;
-
-        // convert normalized coordinate bounds to integer screen
-        // pixel bounds.  Clamp to the edges of the screen.
-        int screenMinX = CLAMP(static_cast<int>(minX * image->width), 0, image->width);
-        int screenMaxX = CLAMP(static_cast<int>(maxX * image->width)+1, 0, image->width);
-        int screenMinY = CLAMP(static_cast<int>(minY * image->height), 0, image->height);
-        int screenMaxY = CLAMP(static_cast<int>(maxY * image->height)+1, 0, image->height);
-
-        int screenWidth  = screenMaxX - screenMinX;
-        int screenHeight = screenMaxY - screenMinY;
+        int screenWidth  = screenX[index2+1] - screenX[index2];
+        int screenHeight = screenY[index2+1] - screenY[index2];
 
         int circleCount = 1;
 

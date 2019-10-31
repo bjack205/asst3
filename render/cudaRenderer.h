@@ -31,8 +31,10 @@ private:
     int* screenY;
     int* bX;
     int* bY;
-    // int* cudaDeviceScreenX;
-    // int* cudaDeviceScreenY;
+    int* cudaDeviceScreenX;
+    int* cudaDeviceScreenY;
+    int* d_bX;
+    int* d_bY;
 
     // New Methods
     void calcBoundingBox();
