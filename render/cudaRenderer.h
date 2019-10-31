@@ -29,7 +29,9 @@ private:
 
     int* screenX;
     int* screenY;
-    int* cudaDeviceScreenX;
+    int* bX;
+    int* bY;
+    // int* cudaDeviceScreenX;
     // int* cudaDeviceScreenY;
 
     // New Methods
