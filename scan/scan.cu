@@ -308,7 +308,6 @@ int find_repeats(int* device_input, int length, int* device_output) {
     exclusive_scan(device_input, length, device_output);
 
     int* output; 
-    int off = length-1;
     output = (int*)malloc(sizeof(int));
     cudaMemcpy(output, device_output + length-1, sizeof(int), cudaMemcpyDeviceToHost); 
 
