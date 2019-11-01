@@ -181,8 +181,8 @@ void exclusive_scan(int* input, int N, int* result)
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
     
-    exclusive_scan_serial(input, N, result);
-    // exclusive_scan_parallel(input, N, result);
+    // exclusive_scan_serial(input, N, result);
+    exclusive_scan_parallel(input, N, result);
 
 }
 
