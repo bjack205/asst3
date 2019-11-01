@@ -27,17 +27,17 @@ private:
     float* cudaDeviceRadius;
     float* cudaDeviceImageData;
 
-    int* screenX;
-    int* screenY;
-    int* bX;
-    int* bY;
-    int* cudaDeviceScreenX;
-    int* cudaDeviceScreenY;
-    int* d_bX;
-    int* d_bY;
+    // int* screenX;
+    // int* screenY;
+    // int* bX;
+    // int* bY;
+    // int* cudaDeviceScreenX;
+    // int* cudaDeviceScreenY;
+    // int* d_bX;
+    // int* d_bY;
 
-    // New Methods
-    void calcBoundingBox();
+    // // New Methods
+    // void calcBoundingBox();
 
 public:
 
